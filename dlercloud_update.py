@@ -1,18 +1,17 @@
 import requests
 import os
 import logging
-import datetime
+from urllib.parse import urlparse
 
 # ================= 配置区域 =================
 API_KEY = "你的_API_KEY_在这里"
-IP_ADDRESS = "192.168.1.100"  # 用于 Surge 托管首行
-PORT = "5888"                 # 用于 Surge 托管首行
+IP_ADDRESS = "192.168.1.100"  # Surge 托管地址
+PORT = "5888"
 
-# 存储目录和日志路径
 SAVE_DIR = "/usr/share/dlercloud"
 LOG_FILE = "/var/log/dler_update.log"
 
-# 软件配置映射: {软件名: [API参数名, 保存文件名, 是否为Surge]}
+# {软件名: [参数名, 文件名, 是否Surge]}
 SOFTWARE_MAP = {
     "Surge": ["surge", "surge.conf", True],
     "Clash": ["clash", "clash.yaml", False],
@@ -21,7 +20,6 @@ SOFTWARE_MAP = {
 }
 # ===========================================
 
-# 初始化日志
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -32,47 +30,50 @@ logging.basicConfig(
 def update_dlercloud():
     if not os.path.exists(SAVE_DIR):
         os.makedirs(SAVE_DIR)
-        logging.info(f"创建目录: {SAVE_DIR}")
 
     for soft_name, config in SOFTWARE_MAP.items():
-        param_name, file_name, is_surge = config
+        param, file_name, is_surge = config
         
-        # 构造 URL
-        url = f"https://dler.cloud/api/v3/download.getFile/{API_KEY}?{param_name}=smart&lv=2"
+        # 构造基础 URL，结尾强制加 .png
         if is_surge:
-            url += "&type=latest"
+            # Surge 特殊处理：增加 type=latest
+            url = f"https://dler.cloud/api/v3/download.getFile/{API_KEY}?{param}=smart&lv=2&type=latest.png"
+        else:
+            url = f"https://dler.cloud/api/v3/download.getFile/{API_KEY}?{param}=smart&lv=2.png"
         
         file_path = os.path.join(SAVE_DIR, file_name)
         
         try:
-            logging.info(f"正在更新 {soft_name}...")
             response = requests.get(url, timeout=30)
+            status_code = response.status_code
             
-            # 检查 HTTP 状态码
-            if response.status_code == 200:
+            if status_code == 200:
                 content = response.text
                 
-                # 特殊处理 Surge 首行
+                # 修改 Surge 首行逻辑
                 if is_surge:
                     lines = content.splitlines()
                     managed_header = f"#!MANAGED-CONFIG http://{IP_ADDRESS}:{PORT}/surge.conf interval=86400"
-                    if lines:
+                    
+                    if lines and lines[0].startswith("#"):
                         lines[0] = managed_header
+                        surge_mod_msg = "成功替换首行内容"
                     else:
-                        lines.append(managed_header)
+                        lines.insert(0, managed_header)
+                        surge_mod_msg = "首行非注释，已在顶部插入托管行"
+                    
                     content = "\n".join(lines)
-                    logging.info("Surge 配置文件首行修改成功。")
+                    logging.info(f"Surge 特殊处理: {surge_mod_msg}")
                 
-                # 写入文件
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 
-                logging.info(f"{soft_name} 更新成功，保存在: {file_path}")
+                logging.info(f"{soft_name} 更新状态: 成功 | 保存路径: {file_path}")
             else:
-                logging.error(f"{soft_name} 更新失败，错误码: {response.status_code}")
+                logging.error(f"{soft_name} 更新状态: 失败 | 错误码: {status_code} | URL: {url}")
                 
         except Exception as e:
-            logging.error(f"{soft_name} 更新时发生异常: {str(e)}")
+            logging.error(f"{soft_name} 更新状态: 异常 | 错误信息: {str(e)}")
 
 if __name__ == "__main__":
     update_dlercloud()
