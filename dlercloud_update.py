@@ -5,13 +5,18 @@ from urllib.parse import urlparse
 
 # ================= 配置区域 =================
 API_KEY = "你的_API_KEY_在这里"
-IP_ADDRESS = "192.168.1.100"  # Surge 托管地址
-PORT = "5888"
+# IP_ADDRESS 现在支持手动填入，或者填入 "auto" 来自动获取公网 IP
+IP_ADDRESS = "auto"  
+PORT = "80"
+
+# --- URL 组成部分配置 ---
+BASE_ENDPOINT = "dler.cloud/api/v3/download.getFile"
+LV_PARAM = "1|2|3"
+FILE_EXT = ".mp4"
 
 SAVE_DIR = "/usr/share/dlercloud"
 LOG_FILE = "/var/log/dler_update.log"
 
-# {软件名: [参数名, 文件名, 是否Surge]}
 SOFTWARE_MAP = {
     "Surge": ["surge", "surge.conf", True],
     "Clash": ["clash", "clash.yaml", False],
@@ -27,19 +32,49 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+def get_public_ip():
+    """获取当前服务器的公网 IP"""
+    # 备选的 IP 获取服务，增加脚本的健壮性
+    services = [
+        'https://api.ipify.org',
+        'https://ifconfig.me/ip',
+        'https://ident.me',
+        'http://ip.42.pl/raw'
+    ]
+    for service in services:
+        try:
+            response = requests.get(service, timeout=10)
+            if response.status_code == 200:
+                ip = response.text.strip()
+                logging.info(f"成功获取公网 IP: {ip} (来源: {service})")
+                return ip
+        except Exception as e:
+            logging.warn(f"无法从 {service} 获取 IP: {e}")
+            continue
+    return None
+
 def update_dlercloud():
+    global IP_ADDRESS
     if not os.path.exists(SAVE_DIR):
         os.makedirs(SAVE_DIR)
+
+    # 如果配置为 auto，则尝试获取公网 IP
+    if IP_ADDRESS.lower() == "auto":
+        fetched_ip = get_public_ip()
+        if fetched_ip:
+            IP_ADDRESS = fetched_ip
+        else:
+            logging.error("无法获取公网 IP，脚本停止运行")
+            return
 
     for soft_name, config in SOFTWARE_MAP.items():
         param, file_name, is_surge = config
         
-        # 构造基础 URL，结尾强制加 .png
+        # 构造 URL
         if is_surge:
-            # Surge 特殊处理：增加 type=latest
-            url = f"https://dler.cloud/api/v3/download.getFile/{API_KEY}?{param}=smart&lv=2&type=latest.png"
+            url = f"https://{BASE_ENDPOINT}/{API_KEY}?{param}=smart&lv={LV_PARAM}&type=latest{FILE_EXT}"
         else:
-            url = f"https://dler.cloud/api/v3/download.getFile/{API_KEY}?{param}=smart&lv=2.png"
+            url = f"https://{BASE_ENDPOINT}/{API_KEY}?{param}=smart&lv={LV_PARAM}{FILE_EXT}"
         
         file_path = os.path.join(SAVE_DIR, file_name)
         
@@ -50,9 +85,9 @@ def update_dlercloud():
             if status_code == 200:
                 content = response.text
                 
-                # 修改 Surge 首行逻辑
                 if is_surge:
                     lines = content.splitlines()
+                    # 关键修改：此时 IP_ADDRESS 已经是动态获取到的公网 IP
                     managed_header = f"#!MANAGED-CONFIG http://{IP_ADDRESS}:{PORT}/surge.conf interval=86400"
                     
                     if lines and lines[0].startswith("#"):
@@ -63,7 +98,7 @@ def update_dlercloud():
                         surge_mod_msg = "首行非注释，已在顶部插入托管行"
                     
                     content = "\n".join(lines)
-                    logging.info(f"Surge 特殊处理: {surge_mod_msg}")
+                    logging.info(f"Surge 特殊处理: {surge_mod_msg} (使用 IP: {IP_ADDRESS})")
                 
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
