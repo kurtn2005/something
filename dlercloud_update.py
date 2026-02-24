@@ -49,7 +49,7 @@ def get_public_ip():
                 logging.info(f"成功获取公网 IP: {ip} (来源: {service})")
                 return ip
         except Exception as e:
-            logging.warn(f"无法从 {service} 获取 IP: {e}")
+            logging.warning(f"无法从 {service} 获取 IP: {e}")
             continue
     return None
 
@@ -75,6 +75,9 @@ def update_dlercloud():
             url = f"https://{BASE_ENDPOINT}/{API_KEY}?{param}=smart&lv={LV_PARAM}&type=latest{FILE_EXT}"
         else:
             url = f"https://{BASE_ENDPOINT}/{API_KEY}?{param}=smart&lv={LV_PARAM}{FILE_EXT}"
+        
+        # 新增一行：在成功或失败前先打印出 URL（调试用）
+        logging.debug(f"正在请求 URL: {url}")
         
         file_path = os.path.join(SAVE_DIR, file_name)
         
